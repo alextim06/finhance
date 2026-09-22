@@ -1,103 +1,223 @@
-import Image from "next/image";
+'use client';
 
-export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+import { useState, useEffect } from 'react';
+import Header from './components/Header';
+import BalanceCard from './components/BalanceCard';
+import Navigation from './components/Navigation';
+import AnimatedTabContent from './components/AnimatedTabContent';
+import FloatingActionButton from './components/FloatingActionButton';
+import AddGoalButton from './components/AddGoalButton';
+import AddTransactionModal from './components/AddTransactionModal';
+import AddGoalModal from './components/AddGoalModal';
+import { Transaction, Goal, Achievement, NewTransaction, NewGoal } from './types';
+import { useAppSettings, useAppData, useDataMigration, useAchievements } from './hooks/index';
+import { useLocalStorageCleanup } from './hooks/useLocalStorageCleanup';
+import { useTheme } from './hooks/useTheme';
+import DebugInfo from './components/DebugInfo';
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+export default function FinHanceApp() {
+  // Используем хук темы с предотвращением гидратации
+  const { isDarkTheme, toggleTheme, isLoaded } = useTheme();
+  
+  // Используем хуки для работы с localStorage
+  const { activeTab, setActiveTab, filterCategory, setFilterCategory } = useAppSettings();
+  const { transactions, goals, achievements } = useAppData();
+  
+  // Очистка localStorage от некорректных данных
+  useLocalStorageCleanup();
+  
+  // Миграция данных
+  useDataMigration();
+  
+  // Автоматическое обновление достижений
+  useAchievements(transactions.items, goals.items, achievements.items, achievements.setItems);
+  
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showGoalModal, setShowGoalModal] = useState(false);
+  const [notification, setNotification] = useState<{type: 'error' | 'success', message: string} | null>(null);
+  
+  const [newTransaction, setNewTransaction] = useState<NewTransaction>({
+    type: 'expense',
+    amount: '',
+    category: 'Еда',
+    date: new Date().toISOString().split('T')[0],
+    description: ''
+  });
+
+  const [newGoal, setNewGoal] = useState<NewGoal>({
+    title: '',
+    target: '',
+    current: 0,
+    type: 'save'
+  });
+
+  // Функция для расчета текущего баланса
+  const calculateBalance = () => {
+    return transactions.items.reduce((balance: number, transaction: Transaction) => {
+      return transaction.type === 'income' 
+        ? balance + transaction.amount 
+        : balance - transaction.amount;
+    }, 0);
+  };
+
+  const addTransaction = () => {
+    if (!newTransaction.amount || !newTransaction.category) return;
+    
+    const amount = parseFloat(newTransaction.amount);
+    const currentBalance = calculateBalance();
+    
+    // Проверяем, если это расход и сумма превышает баланс
+    if (newTransaction.type === 'expense' && amount > currentBalance) {
+      setNotification({
+        type: 'error',
+        message: `Недостаточно средств! Текущий баланс: ${currentBalance.toLocaleString('ru-RU')}₽`
+      });
+      
+      // Автоматически скрываем уведомление через 5 секунд
+      setTimeout(() => setNotification(null), 5000);
+      return;
+    }
+    
+    // Добавляем транзакцию через хук
+    transactions.addItem({
+      type: newTransaction.type,
+      amount: amount,
+      category: newTransaction.category,
+      date: newTransaction.date,
+      description: newTransaction.description
+    });
+    
+    setShowAddModal(false);
+    setNewTransaction({
+      type: 'expense',
+      amount: '',
+      category: 'Еда',
+      date: new Date().toISOString().split('T')[0],
+      description: ''
+    });
+    
+    // Показываем успешное уведомление
+    setNotification({
+      type: 'success',
+      message: 'Операция успешно добавлена!'
+    });
+    
+    setTimeout(() => setNotification(null), 3000);
+  };
+
+  const addGoal = () => {
+    if (!newGoal.title || !newGoal.target) return;
+    
+    // Добавляем цель через хук
+    goals.addItem({
+      title: newGoal.title,
+      target: parseFloat(newGoal.target),
+      current: 0,
+      type: newGoal.type
+    });
+    
+    setShowGoalModal(false);
+    setNewGoal({ title: '', target: '', current: 0, type: 'save' });
+  };
+
+  const handleToggleTheme = () => {
+    toggleTheme();
+  };
+
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+  };
+
+  const handleFilterChange = (category: string) => {
+    setFilterCategory(category);
+  };
+
+  const handleTransactionChange = (transaction: NewTransaction) => {
+    setNewTransaction(transaction);
+  };
+
+  const handleGoalChange = (goal: NewGoal) => {
+    setNewGoal(goal);
+  };
+
+  // Показываем загрузку до инициализации темы
+  if (!isLoaded) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+          <p className="mt-2 text-gray-600">Загрузка...</p>
         </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`min-h-screen transition-colors ${isDarkTheme ? 'bg-black' : 'bg-gray-50'}`}>
+      <Header isDarkTheme={isDarkTheme} onToggleTheme={handleToggleTheme} />
+      <BalanceCard transactions={transactions.items} isDarkTheme={isDarkTheme} />
+      <Navigation activeTab={activeTab} onTabChange={handleTabChange} isDarkTheme={isDarkTheme} />
+
+      <main className="max-w-7xl mx-auto px-6 py-8">
+        <AnimatedTabContent
+          activeTab={activeTab}
+          transactions={transactions.items}
+          goals={goals.items}
+          achievements={achievements.items}
+          isDarkTheme={isDarkTheme}
+          filterCategory={filterCategory}
+          onFilterChange={handleFilterChange}
+          onToggleTheme={handleToggleTheme}
+        />
       </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+
+      <FloatingActionButton onClick={() => setShowAddModal(true)} />
+
+      {activeTab === 'goals' && (
+        <AddGoalButton onClick={() => setShowGoalModal(true)} />
+      )}
+
+      <DebugInfo achievements={achievements.items} isDarkTheme={isDarkTheme} />
+
+      <AddTransactionModal
+        isOpen={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        newTransaction={newTransaction}
+        onTransactionChange={handleTransactionChange}
+        onAddTransaction={addTransaction}
+        isDarkTheme={isDarkTheme}
+      />
+
+      <AddGoalModal
+        isOpen={showGoalModal}
+        onClose={() => setShowGoalModal(false)}
+        newGoal={newGoal}
+        onGoalChange={handleGoalChange}
+        onAddGoal={addGoal}
+        isDarkTheme={isDarkTheme}
+      />
+
+      {/* Уведомления */}
+      {notification && (
+        <div className={`fixed top-4 right-4 z-50 p-4 rounded-2xl shadow-lg transition-all duration-300 ${
+          notification.type === 'error' 
+            ? 'bg-red-500 text-white' 
+            : 'bg-green-500 text-white'
+        }`}>
+          <div className="flex items-center gap-3">
+            <span className="text-xl">
+              {notification.type === 'error' ? '⚠️' : '✅'}
+            </span>
+            <span className="font-medium">{notification.message}</span>
+            <button 
+              onClick={() => setNotification(null)}
+              className="ml-2 text-white/80 hover:text-white transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
